@@ -52,7 +52,8 @@ module JekyllImport
         host   = options.fetch('host', "localhost")
         prefix = options.fetch('prefix', "")
 
-        db = Sequel.mysql(dbname, :user => user, :password => pass, :host => host, :encoding => 'utf8')
+        # db = Sequel.mysql(dbname, :user => user, :password => pass, :host => host, :encoding => 'utf8')
+        db = Sequel.mysql(dbname, adapter: 'mysql2', :user => user, :password => pass, :host => host, :encoding => 'utf8')
 
         unless prefix.empty?
           QUERY[" node "] = " " + prefix + "node "
@@ -69,11 +70,27 @@ module JekyllImport
           title = post[:title]
           content = post[:body_value]
           created = post[:created]
+          author = db["select users.name as 'author' from node inner join users on node.uid = users.uid where node.nid = #{node_id}"].first[:author]
+
+          begin 
+            tags = db["select GROUP_CONCAT(taxonomy_term_data.name) As 'tags' from taxonomy_index INNER JOIN taxonomy_term_data ON taxonomy_index.tid = taxonomy_term_data.tid where nid = #{node_id};"].first[:tags].split(",")
+          rescue NoMethodError
+            tags = nil
+          end
+
+          begin 
+            permalink = db["select alias as 'permalink' from views_url_alias_node where views_url_alias_node.nid = #{node_id};"].first[:permalink]
+          rescue NoMethodError
+            permalink = nil
+          end
+
           time = Time.at(created)
           is_published = post[:status] == 1
           dir = is_published ? "_posts" : "_drafts"
           slug = title.strip.downcase.gsub(/(&|&amp;)/, ' and ').gsub(/[\s\.\/\\]/, '-').gsub(/[^\w-]/, '').gsub(/[-_]{2,}/, '-').gsub(/^[-_]/, '').gsub(/[-_]$/, '')
           name = time.strftime("%Y-%m-%d-") + slug + '.md'
+          permalink ||= slug
+
 
           # Get the relevant fields as a hash, delete empty fields and convert
           # to YAML for the header
@@ -81,6 +98,9 @@ module JekyllImport
              'layout' => 'post',
              'title' => title.to_s,
              'created' => created,
+             'author' => author,
+             'permalink' => permalink,
+             'tags' => tags
            }.delete_if { |k,v| v.nil? || v == ''}.to_yaml
 
           # Write out the data and content to file
